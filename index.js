@@ -39,6 +39,42 @@ const getUsageInstructions = (type) => {
     documentation: 'Visit /help for complete documentation'
   };
 
+  // JavaScript example template with the correct service URL
+  const jsExample = `// JavaScript Example
+const fetchLogs = async () => {
+  try {
+    const response = await fetch('https://logendpoint-415554190254.us-central1.run.app/query-logs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': 'nifya' // Replace with your API key
+      },
+      body: JSON.stringify({
+        service: 'backend', // Required: Name of the service to query logs from
+        filter: 'severity>=ERROR', // Optional: Filter criteria
+        limit: 10 // Optional: Maximum number of logs to return
+      })
+    });
+    
+    const data = await response.json();
+    console.log(data);
+    
+    // Handle the logs data
+    if (data.logs && data.logs.length > 0) {
+      data.logs.forEach(log => {
+        console.log(\`[\${log.timestamp}] [\${log.severity}] \${JSON.stringify(log.message)}\`);
+      });
+    } else {
+      console.log('No logs found');
+    }
+  } catch (error) {
+    console.error('Error fetching logs:', error);
+  }
+};
+
+// Call the function to fetch logs
+fetchLogs();`;
+
   switch (type) {
     case 'unauthorized':
       return {
@@ -48,8 +84,12 @@ const getUsageInstructions = (type) => {
           headers: {
             'Content-Type': 'application/json',
             'x-api-key': 'your-api-key'
+          },
+          body: {
+            service: 'backend'
           }
-        }
+        },
+        javascriptExample: jsExample
       };
     case 'missing-service':
       return {
@@ -61,7 +101,8 @@ const getUsageInstructions = (type) => {
             filter: 'severity>=ERROR',  // Optional
             limit: 10  // Optional
           }
-        }
+        },
+        javascriptExample: jsExample
       };
     case 'invalid-json':
       return {
@@ -73,10 +114,14 @@ const getUsageInstructions = (type) => {
             filter: 'severity>=ERROR',
             limit: 10
           }
-        }
+        },
+        javascriptExample: jsExample
       };
     default:
-      return baseInstructions;
+      return {
+        ...baseInstructions,
+        javascriptExample: jsExample
+      };
   }
 };
 
