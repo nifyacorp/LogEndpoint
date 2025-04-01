@@ -3,6 +3,8 @@ const { Logging } = require('@google-cloud/logging');
 const cors = require('cors');
 const helmet = require('helmet');
 const dotenv = require('dotenv');
+const fs = require('fs');
+const path = require('path');
 
 // Load environment variables
 dotenv.config();
@@ -13,13 +15,79 @@ const port = process.env.PORT || 8080;
 // Middleware
 app.use(helmet());
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  // Add error handling for malformed JSON
+  verify: (req, res, buf, encoding) => {
+    try {
+      JSON.parse(buf);
+    } catch (e) {
+      res.status(400).json({
+        error: 'Invalid JSON format',
+        usage: getUsageInstructions('invalid-json')
+      });
+      throw new Error('Invalid JSON');
+    }
+  }
+}));
+
+// Usage instructions for different error scenarios
+const getUsageInstructions = (type) => {
+  const baseInstructions = {
+    endpoint: '/query-logs',
+    method: 'POST',
+    authentication: 'Include x-api-key header with your API key',
+    documentation: 'Visit /help for complete documentation'
+  };
+
+  switch (type) {
+    case 'unauthorized':
+      return {
+        ...baseInstructions,
+        error: 'API key is missing or invalid',
+        example: {
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': 'your-api-key'
+          }
+        }
+      };
+    case 'missing-service':
+      return {
+        ...baseInstructions,
+        error: 'Service name is required',
+        example: {
+          body: {
+            service: 'backend',  // Required
+            filter: 'severity>=ERROR',  // Optional
+            limit: 10  // Optional
+          }
+        }
+      };
+    case 'invalid-json':
+      return {
+        ...baseInstructions,
+        error: 'Request body must be valid JSON',
+        example: {
+          body: {
+            service: 'backend',
+            filter: 'severity>=ERROR',
+            limit: 10
+          }
+        }
+      };
+    default:
+      return baseInstructions;
+  }
+};
 
 // Simple API key auth middleware
 const apiKeyAuth = (req, res, next) => {
   const apiKey = req.headers['x-api-key'];
   if (!apiKey || apiKey !== process.env.API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
+    return res.status(401).json({ 
+      error: 'Unauthorized',
+      usage: getUsageInstructions('unauthorized')
+    });
   }
   next();
 };
@@ -29,8 +97,55 @@ app.get('/', (req, res) => {
   res.json({ 
     service: 'Log Endpoint', 
     status: 'running',
-    endpoints: ['/query-logs']
+    endpoints: ['/query-logs', '/help'],
+    documentation: 'Visit /help for detailed usage instructions'
   });
+});
+
+// Help endpoint - returns usage documentation
+app.get('/help', (req, res) => {
+  try {
+    // Read the usage guide markdown
+    const usageGuidePath = path.join(__dirname, 'usage-guide.md');
+    
+    if (fs.existsSync(usageGuidePath)) {
+      const usageGuide = fs.readFileSync(usageGuidePath, 'utf8');
+      res.setHeader('Content-Type', 'text/markdown');
+      res.send(usageGuide);
+    } else {
+      // Fallback to JSON if file doesn't exist
+      res.json({
+        service: 'Log Endpoint',
+        description: 'A service for retrieving logs from other services in the same GCP project',
+        authentication: 'API key required in x-api-key header',
+        endpoints: [
+          {
+            path: '/query-logs',
+            method: 'POST',
+            description: 'Retrieve logs from a specified service',
+            required_fields: ['service'],
+            optional_fields: ['filter', 'limit'],
+            example: {
+              request: {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': 'your-api-key'
+                },
+                body: {
+                  service: 'backend',
+                  filter: 'severity>=ERROR',
+                  limit: 10
+                }
+              }
+            }
+          }
+        ]
+      });
+    }
+  } catch (error) {
+    console.error('Error serving help documentation:', error);
+    res.status(500).json({ error: 'Failed to retrieve documentation' });
+  }
 });
 
 // Main logs query endpoint
@@ -39,7 +154,10 @@ app.post('/query-logs', apiKeyAuth, async (req, res) => {
     const { service, filter = '', limit = 1000 } = req.body;
     
     if (!service) {
-      return res.status(400).json({ error: 'Service name is required' });
+      return res.status(400).json({ 
+        error: 'Service name is required',
+        usage: getUsageInstructions('missing-service')
+      });
     }
 
     const logging = new Logging();
@@ -70,9 +188,28 @@ app.post('/query-logs', apiKeyAuth, async (req, res) => {
     console.error('Error fetching logs:', error);
     res.status(500).json({ 
       error: 'Failed to retrieve logs',
-      message: error.message
+      message: error.message,
+      usage: getUsageInstructions()
     });
   }
+});
+
+// Generic 404 handler with usage instructions
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Endpoint not found',
+    availableEndpoints: ['/query-logs', '/help'],
+    documentation: 'Visit /help for detailed usage instructions'
+  });
+});
+
+// Error handler for unexpected errors
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    error: 'Internal server error',
+    usage: getUsageInstructions()
+  });
 });
 
 // Start server
